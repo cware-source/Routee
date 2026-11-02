@@ -31,33 +31,43 @@ async function upsert(db, existing, props) {
   return nf("POST", "/pages", { parent: { database_id: db }, properties: props });
 }
 
+const dayOf = (p) => ({ id: txt(p.properties["앱ID"]), date: (p.properties["날짜"].date || {}).start || "", note: txt(p.properties["한 줄 메모"]) });
+const stopOf = (p, idOf) => {
+  const q = p.properties, rel = (q["날짜"].relation || [])[0];
+  return { id: txt(q["앱ID"]), day: rel ? idOf[rel.id] : "", s: txt(q["시작"]), e: txt(q["종료"]),
+    n: (q["이름"].title || []).map(t => t.plain_text).join(""), c: (q["분류"].select || {}).name || "식사",
+    a: (q["지역"].select || {}).name || "", m: txt(q["메모"]), mv: (q["이동수단"].select || {}).name || "도보",
+    mm: q["이동시간(분)"].number || 0, md: q["이동거리(m)"].number || 0, g: q["구글지도 링크"].url || "",
+    lat: q["위도"].number, lng: q["경도"].number, o: q["순서"].number || 0 };
+};
+// 바뀐 것만 노션에 쓰기 위한 비교용 값
+const kd = d => JSON.stringify([d.date || "", d.note || ""]);
+const ks = s => JSON.stringify([s.day, s.s || "", s.e || "", s.n || "", s.c || "", s.a || "", s.m || "", s.mv || "", +s.mm || 0, +s.md || 0, s.g || "", typeof s.lat === "number" ? s.lat : null, typeof s.lng === "number" ? s.lng : null]);
+
 export default async function handler(req, res) {
   const code = String(req.query.code || "").toUpperCase().replace(/[^A-Z0-9가-힣-]/g, "").slice(0, 20);
   const DAYS = process.env.NOTION_DAYS_DB, STOPS = process.env.NOTION_STOPS_DB;
   if (!process.env.NOTION_TOKEN || !DAYS || !STOPS) return res.status(501).json({ error: "not configured" });
   if (code.length < 3) return res.status(400).json({ error: "bad code" });
+  if (req.method === "PUT" && code === "DEMO") return res.status(403).json({ error: "DEMO is read-only" });
   res.setHeader("Cache-Control", "no-store");
   try {
     const dayPages = await listGroup(DAYS, code), stopPages = await listGroup(STOPS, code);
     if (req.method === "GET") {
       const idOf = {}; dayPages.forEach(p => { idOf[p.id] = txt(p.properties["앱ID"]); });
-      const days = dayPages.map(p => ({ id: txt(p.properties["앱ID"]), date: (p.properties["날짜"].date || {}).start || "", note: txt(p.properties["한 줄 메모"]) })).filter(d => d.id);
-      const stops = stopPages.map(p => {
-        const q = p.properties, rel = (q["날짜"].relation || [])[0];
-        return { id: txt(q["앱ID"]), day: rel ? idOf[rel.id] : "", s: txt(q["시작"]), e: txt(q["종료"]),
-          n: (q["이름"].title || []).map(t => t.plain_text).join(""), c: (q["분류"].select || {}).name || "식사",
-          a: (q["지역"].select || {}).name || "", m: txt(q["메모"]), mv: (q["이동수단"].select || {}).name || "도보",
-          mm: q["이동시간(분)"].number || 0, md: q["이동거리(m)"].number || 0, g: q["구글지도 링크"].url || "",
-          lat: q["위도"].number, lng: q["경도"].number, o: q["순서"].number || 0 };
-      }).filter(s => s.id && s.day);
+      const days = dayPages.map(dayOf).filter(d => d.id);
+      const stops = stopPages.map(p => stopOf(p, idOf)).filter(s => s.id && s.day);
       return res.json({ days, stops });
     }
     if (req.method === "PUT") {
       const { days = [], stops = [] } = req.body || {};
       if (days.length > 60 || stops.length > 400) return res.status(413).json({ error: "too large" });
-      const dayMap = {}; dayPages.forEach(p => { dayMap[txt(p.properties["앱ID"])] = p.id; });
-      const stopMap = {}; stopPages.forEach(p => { stopMap[txt(p.properties["앱ID"])] = p.id; });
+      const dayMap = {}, oldDay = {}, idOf = {};
+      dayPages.forEach(p => { const o = dayOf(p); dayMap[o.id] = p.id; oldDay[o.id] = kd(o); idOf[p.id] = o.id; });
+      const stopMap = {}, oldStop = {};
+      stopPages.forEach(p => { const o = stopOf(p, idOf); stopMap[o.id] = p.id; oldStop[o.id] = ks(o); });
       for (const d of days) {
+        if (dayMap[d.id] && oldDay[d.id] === kd(d)) continue;
         const pg = await upsert(DAYS, dayMap[d.id], {
           "이름": { title: [{ text: { content: d.date || "날짜" } }] }, "날짜": { date: d.date ? { start: d.date } : null },
           "한 줄 메모": rt(d.note), "그룹 코드": rt(code), "앱ID": rt(d.id) });
@@ -66,6 +76,7 @@ export default async function handler(req, res) {
       const seen = {};
       for (const s of stops) {
         if (!dayMap[s.day]) continue;
+        if (stopMap[s.id] && oldStop[s.id] === ks(s)) continue;
         const idx = (seen[s.day] = (seen[s.day] || 0) + 1);
         const pg = await upsert(STOPS, stopMap[s.id], {
           "이름": { title: [{ text: { content: s.n || "(이름 없음)" } }] }, "날짜": { relation: [{ id: dayMap[s.day] }] },
