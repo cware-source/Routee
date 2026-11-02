@@ -175,6 +175,7 @@ dialog h2 { margin: 0; font-family: var(--serif); font-weight: 400; font-size: 2
 .gname { font-size: 14px; opacity: .8; }
 .gcode { font-family: var(--serif); font-size: 28px; letter-spacing: .12em; margin-top: 2px; }
 #grp-lbl { max-width: 9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
+body.ro #btn-day, body.ro #btn-stop, body.ro #quick, body.ro [data-act="edit"], body.ro [data-act="del"], body.ro [data-act="day-add"], body.ro [data-act="day-edit"], body.ro [data-act="day-del"], body.ro .fixbtn, body.ro .tk.add { display: none !important; }
 .dfoot { display: flex; justify-content: flex-end; gap: 8px; }
 .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(18px + env(safe-area-inset-bottom, 0px)); z-index: 50; background: var(--ink); color: var(--paper); border-radius: 999px; padding: 9px 18px; font-size: 14px; display: flex; gap: 14px; align-items: center; }
 .toast button { background: none; border: 0; color: var(--paper); text-decoration: underline; cursor: pointer; padding: 0; font-weight: 700; }
@@ -357,7 +358,7 @@ var $ = function (id) { return document.getElementById(id); };
 function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
 
 var CATS = { "식사": "#ee8467", "카페": "#c9a06a", "관광": "#5f9f7e", "쇼핑": "#9d89d6", "숙소": "#3f8fd8", "이동": "#7a93a0" };
-var MOVES = { "도보": "🚶", "지하철": "🚇", "버스": "🚌", "택시": "🚕" };
+var MOVES = { "도보": "🚶", "지하철": "🚇", "버스": "🚌", "택시": "🚕", "비행기": "✈️" };
 var WD = ["일", "월", "화", "수", "목", "금", "토"];
 
 /* 맛집 목록 연동 자리: 나중에는 기존 /api/places 결과가 여기에 들어옵니다. */
@@ -398,9 +399,12 @@ function gk(code) { return "routee-g-" + code; }
 function loadGroups() { try { var g = JSON.parse(localStorage.getItem(GKEY) || "null"); if (g && g.list) grp = g; } catch (e) {} }
 function saveGroups() { try { localStorage.setItem(GKEY, JSON.stringify(grp)); } catch (e) {} }
 function curGroup() { return grp.list.filter(function (g) { return g.code === grp.cur; })[0] || null; }
-function save() { if (!grp.cur) return; try { localStorage.setItem(gk(grp.cur), JSON.stringify({ days: days, stops: stops })); } catch (e) {} syncDirty(); }
+function isRO() { return grp.cur === "DEMO"; }
+function roGuard() { if (!isRO()) return false; toast("DEMO 그룹은 구경만 할 수 있어요. 새 그룹을 만들어 일정을 만들어 보세요."); return true; }
+function save() { if (!grp.cur || isRO()) return; try { localStorage.setItem(gk(grp.cur), JSON.stringify({ days: days, stops: stops })); } catch (e) {} syncDirty(); }
 function restore() {
   days = []; stops = [];
+  if (isRO()) { var o = JSON.parse(SAMPLE); days = o.days; stops = o.stops; return; }
   try { var d = JSON.parse(localStorage.getItem(gk(grp.cur)) || "null"); if (d && d.days) { days = d.days; stops = d.stops || []; } } catch (e) {}
 }
 function normCode(v) { return String(v || "").toUpperCase().replace(/[^A-Z0-9가-힣-]/g, "").slice(0, 20); }
@@ -416,24 +420,25 @@ function enterGroup(code, name, seed) {
   $("grp-lbl").textContent = g.name || g.code;
   sync.on = false; sync.last = ""; sync.dirty = false; clearTimeout(sync.timer); setBadge();
   routeEpoch++; refresh();
-  syncPull(true);
+  if (!isRO()) syncPull(true);
   return true;
 }
 /* ---------- 서버(노션) 동기화: /api/routee/:code 가 있을 때만 켜집니다 ---------- */
-var sync = { on: false, dirty: false, timer: null, last: "", busy: false };
+var sync = { on: false, dirty: false, timer: null, last: "", busy: false, quiet: 0, fails: 0 };
+var POLL_MS = 4000;
 function canon(ds, ss) {
   var a = ds.map(function (d) { return [d.id, d.date, d.note || ""]; }).sort(), b = ss.map(function (x) { return [x.id, x.day, x.s, x.e || "", x.n, x.c, x.a || "", x.m || "", x.mv, +x.mm || 0, +x.md || 0, x.g || "", typeof x.lat === "number" ? x.lat : null, typeof x.lng === "number" ? x.lng : null]; }).sort();
   return JSON.stringify([a, b]);
 }
-function setBadge() { var g = curGroup(); if (g) $("grp-lbl").textContent = (g.name || g.code) + (sync.on ? " ☁" : ""); }
+function setBadge() { var g = curGroup(); document.body.classList.toggle("ro", isRO()); if (g) $("grp-lbl").textContent = (g.name || g.code) + (isRO() ? " 🔒" : sync.on ? " ☁" : ""); }
 function syncUrl() { return "/api/routee/" + encodeURIComponent(grp.cur); }
-function busyUI() { return $("dlg").open || $("ddlg").open || (typeof drag !== "undefined" && drag); }
+function busyUI() { return $("dlg").open || $("ddlg").open || $("cfm").open || state.adding || (typeof drag !== "undefined" && drag); }
 function syncPull(first) {
-  if (!grp.cur || sync.dirty || sync.busy) return Promise.resolve();
+  if (!grp.cur || isRO() || sync.dirty || sync.busy || Date.now() < sync.quiet) return Promise.resolve();
   var code = grp.cur;
   return fetch(syncUrl(), { cache: "no-store" }).then(function (r) { if (!r.ok) throw new Error("x"); return r.json(); }).then(function (d) {
     if (code !== grp.cur || sync.dirty) return;
-    sync.on = true; setBadge();
+    sync.on = true; sync.fails = 0; setBadge();
     var rc = canon(d.days, d.stops);
     if (d.days.length) {
       if (rc !== sync.last && rc !== canon(days, stops)) {
@@ -445,7 +450,7 @@ function syncPull(first) {
       }
       sync.last = rc;
     } else if (first && days.length) { syncPush(); }
-  }).catch(function () { sync.on = false; setBadge(); });
+  }).catch(function () { sync.fails++; if (sync.fails >= 3) { sync.on = false; setBadge(); } });
 }
 function save0() { try { localStorage.setItem(gk(grp.cur), JSON.stringify({ days: days, stops: stops })); } catch (e) {} }
 function syncDirty() { if (!sync.on) return; sync.dirty = true; clearTimeout(sync.timer); sync.timer = setTimeout(syncPush, 1200); }
@@ -453,7 +458,7 @@ function syncPush() {
   if (!grp.cur || sync.busy) { if (sync.busy) sync.timer = setTimeout(syncPush, 1500); return; }
   var code = grp.cur, snap = canon(days, stops); sync.busy = true;
   fetch(syncUrl(), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ days: days, stops: stops }) })
-    .then(function (r) { if (!r.ok) throw new Error("x"); sync.last = snap; if (code === grp.cur && snap === canon(days, stops)) sync.dirty = false; })
+    .then(function (r) { if (!r.ok) throw new Error("x"); sync.last = snap; sync.quiet = Date.now() + 3500; if (code === grp.cur && snap === canon(days, stops)) sync.dirty = false; })
     .catch(function () { toast("서버 저장에 실패했어요. 잠시 후 다시 시도합니다."); sync.timer = setTimeout(syncPush, 8000); })
     .then(function () { sync.busy = false; if (sync.dirty && !sync.timer) syncDirty(); });
 }
@@ -840,6 +845,7 @@ function toast(msg, label, fn, label2, fn2) {
 /* ---------- 장소 검색 → 지도에서 고르기 → 일정 추가 ---------- */
 var resultList = [];
 function startAdd() {
+  if (roGuard()) return;
   if (!state.day) { openDay(null); return; }
   state.adding = true; state.cand = null; state.sel = null;
   document.body.classList.add("adding");
@@ -938,9 +944,9 @@ var TRAVEL_MODE = { "도보": "WALKING", "지하철": "TRANSIT", "버스": "TRAN
 function fmtDist(m) { return m < 1000 ? Math.round(m) + "m" : (m / 1000).toFixed(1) + "km"; }
 /* 구글 경로를 못 쓸 때: 직선거리 × 1.3 을 길 거리로 보고 수단별 평균 속도 + 대기시간으로 대략 계산 */
 function estimateRoute(a, b, mv) {
-  var m = hav(a.lat, a.lng, b.lat, b.lng) * 1.3;
-  var kmh = { "도보": 4.8, "지하철": 28, "버스": 16, "택시": 26 }[mv] || 4.8;
-  var wait = { "도보": 0, "지하철": 7, "버스": 8, "택시": 4 }[mv] || 0;
+  var m = hav(a.lat, a.lng, b.lat, b.lng) * (mv === "비행기" ? 1 : 1.3);
+  var kmh = { "도보": 4.8, "지하철": 28, "버스": 16, "택시": 26, "비행기": 800 }[mv] || 4.8;
+  var wait = { "도보": 0, "지하철": 7, "버스": 8, "택시": 4, "비행기": 120 }[mv] || 0;
   return { min: Math.max(1, Math.round(m / 1000 / kmh * 60 + wait)), m: Math.round(m), src: "est" };
 }
 function prevStop(dayId, startStr) {
@@ -964,11 +970,11 @@ function calcRoute(auto) {
   if (!hasLL(prev)) { note.className = "calcnote bad"; note.textContent = "이전 일정 ‘" + prev.n + "’에 좌표가 없어 계산할 수 없어요."; return; }
   var seq = ++calcSeq, A = { lat: prev.lat, lng: prev.lng }, B = { lat: ll.lat, lng: ll.lng };
   note.textContent = "‘" + prev.n + "’에서 계산 중…";
-  var job = (mapApi && mapApi.route) ? mapApi.route(A, B, TRAVEL_MODE[mv], departAt(dayId, prev.e || prev.s), mv) : Promise.resolve(estimateRoute(A, B, mv));
+  var job = (mv !== "비행기" && mapApi && mapApi.route) ? mapApi.route(A, B, TRAVEL_MODE[mv], departAt(dayId, prev.e || prev.s), mv) : Promise.resolve(estimateRoute(A, B, mv));
   job.then(function (r) {
     if (seq !== calcSeq || !$("dlg").open) return;
     calc = r; mmManual = false; $("f-mm").value = r.min;
-    note.textContent = "‘" + prev.n + "’에서 " + fmtDist(r.m) + " · 약 " + r.min + "분 (" + (r.src === "est" ? "직선거리 기준 대략 추정" : "구글 경로 기준") + ")";
+    note.textContent = "‘" + prev.n + "’에서 " + fmtDist(r.m) + " · 약 " + r.min + "분 (" + (mv === "비행기" ? "직선거리 + 공항 수속·대기 약 2시간 포함, 대략 추정" : r.src === "est" ? "직선거리 기준 대략 추정" : "구글 경로 기준") + ")";
   });
 }
 
@@ -983,6 +989,7 @@ function radioVal(name) { var r = document.querySelector('input[name="' + name +
 var endManual = false;
 function clearDur() { var r = document.querySelector('input[name="dur"]:checked'); if (r) r.checked = false; }
 function openStop(p, dayId, cand) {
+  if (roGuard()) return;
   editing = p || null;
   $("dlg-title").textContent = p ? "일정 수정" : "일정 추가";
   $("f-day").innerHTML = sortedDays().map(function (d) { return '<option value="' + d.id + '">DAY ' + dayNo(d.id) + " · " + fmtDate(d) + " " + wd(d) + '</option>'; }).join("");
@@ -1037,6 +1044,7 @@ function onSaveStop(e) {
 /* ---------- 날짜 팝업 ---------- */
 var editingDay = null;
 function openDay(d) {
+  if (roGuard()) return;
   editingDay = d || null;
   $("ddlg-title").textContent = d ? "날짜 수정" : "날짜 추가";
   var sd = sortedDays(), next = "";
@@ -1058,6 +1066,7 @@ function onSaveDay(e) {
 var pending = null;
 function snapshot() { return JSON.stringify({ days: days, stops: stops, day: state.day }); }
 function askDelete(kind, id) {
+  if (roGuard()) return;
   pending = { kind: kind, id: id };
   if (kind === "stop") { var p = stops.find(function (s) { return s.id === id; }); $("cfm-text").textContent = "‘" + p.n + "’ 일정을 삭제합니다."; }
   else { var d = dayOf(id); $("cfm-text").textContent = fmtDate(d) + " 날짜와 그날의 일정 " + dayStops(id).length + "개를 함께 삭제합니다."; }
@@ -1119,6 +1128,7 @@ function dropStop(id, k) {
 }
 /* 겹치는 일정을 뒤로 밀어서 정리: 앞 일정이 끝나기 전에 시작하는 일정만, 앞 일정 끝 + 이동 시간으로 순서대로 늦춥니다. */
 function fixTimes(dayId) {
+  if (isRO()) return;
   var snap = snapshot(), list = dayStops(dayId), moved = 0;
   list.forEach(function (q, i) {
     if (!i) return;
@@ -1231,7 +1241,7 @@ function finishDrop() {
 }
 function initDrag() {
   document.addEventListener("pointerdown", function (e) {
-    if (drag || state.adding || (e.pointerType === "mouse" && e.button !== 0)) return;
+    if (drag || state.adding || isRO() || (e.pointerType === "mouse" && e.button !== 0)) return;
     var tk = e.target.closest(".tk:not(.add)"), li = tk ? null : e.target.closest(".stop");
     if (!tk && !li) return;
     if (li && e.target.closest("a, button")) return;
@@ -1333,20 +1343,20 @@ function initGroups() {
   $("gs-share").addEventListener("click", shareGroup);
   $("gs-copy").addEventListener("click", function () { var g = curGroup(); copyText(g.code).then(function (ok) { gwarn("gs-warn", ok ? "코드를 복사했어요." : "복사에 실패했어요. 코드를 직접 전달해 주세요."); }); });
   window.addEventListener("hashchange", applyHash);
-  setInterval(function () { if (!document.hidden) syncPull(false); }, 15000);
+  (function loop() { setTimeout(function () { (document.hidden ? Promise.resolve() : syncPull(false)).then(loop, loop); }, sync.fails ? Math.min(30000, POLL_MS * (sync.fails + 1)) : POLL_MS); })();
   document.addEventListener("visibilitychange", function () { if (!document.hidden) syncPull(false); });
   applyHash().then(function () { if (!curGroup()) openGate(false); });
 }
 (function init() {
   loadGroups(); renderLegend(); initDrag();
   if (!grp.list.length) { try { var old = localStorage.getItem("fm-trip-demo"); if (old) { grp.list.push({ code: "DEMO", name: "예시 여행" }); grp.cur = "DEMO"; localStorage.setItem(gk("DEMO"), old); saveGroups(); } } catch (e) {} }
-  if (!curGroup()) { grp.cur = ""; days = []; stops = []; } else { restore(); $("grp-lbl").textContent = curGroup().name || grp.cur; }
+  if (!curGroup()) { grp.cur = ""; days = []; stops = []; } else { restore(); setBadge(); }
   state.day = sortedDays()[0] ? sortedDays()[0].id : null;
   mapApi = getFb();
   refresh();
   startMap();
   initGroups();
-  if (curGroup()) syncPull(true);
+  if (curGroup() && !isRO()) syncPull(true);
   $("btn-stop").addEventListener("click", function () { if (!days.length) openDay(null); else if (state.adding) endAdd(); else startAdd(); });
   $("quick").addEventListener("click", function () { startAdd(); });
   $("btn-loc").addEventListener("click", function () { if (watchId !== null) locOff(); else locOn(); });
