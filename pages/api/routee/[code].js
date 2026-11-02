@@ -31,7 +31,7 @@ async function upsert(db, existing, props) {
   return nf("POST", "/pages", { parent: { database_id: db }, properties: props });
 }
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   const code = String(req.query.code || "").toUpperCase().replace(/[^A-Z0-9가-힣-]/g, "").slice(0, 20);
   const DAYS = process.env.NOTION_DAYS_DB, STOPS = process.env.NOTION_STOPS_DB;
   if (!process.env.NOTION_TOKEN || !DAYS || !STOPS) return res.status(501).json({ error: "not configured" });
@@ -81,4 +81,4 @@ module.exports = async function handler(req, res) {
     }
     res.setHeader("Allow", "GET, PUT"); return res.status(405).end();
   } catch (e) { return res.status(502).json({ error: String(e.message || e) }); }
-};
+}
