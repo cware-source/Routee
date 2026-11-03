@@ -96,6 +96,11 @@ h1 { font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 4vw, 40
 .note h3 { margin: 0; font-size: 16.5px; line-height: 1.35; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
 .tag { font-family: var(--sans); font-size: 11px; font-weight: 700; padding: 0 7px; border-radius: 4px; background: color-mix(in srgb, var(--c) 16%, var(--surface)); color: var(--c); }
 .area { font-size: 12.5px; color: var(--muted); font-weight: 400; }
+.memobtn { margin-left: auto; border: 1px dashed var(--line); background: var(--paper); border-radius: 999px; width: 30px; height: 26px; padding: 0; cursor: pointer; font-size: 14px; line-height: 1; opacity: .55; position: relative; align-self: center; }
+.memobtn:hover, .memobtn:focus-visible { opacity: 1; border-color: var(--c); }
+.memobtn.has { opacity: 1; border-style: solid; border-color: var(--c); background: color-mix(in srgb, var(--c) 14%, var(--paper)); }
+.memobtn.has::after { content: ""; position: absolute; top: -3px; right: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+#mtext { min-height: 150px; resize: vertical; line-height: 1.55; }
 .memo { margin-top: 4px; font-size: 13.5px; color: var(--muted); white-space: pre-line; }
 .links { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; align-items: center; }
 .links .sp { flex: 1; }
@@ -340,6 +345,20 @@ body.ro #btn-day, body.ro #btn-stop, body.ro #quick, body.ro [data-act="edit"], 
   </form>
 </dialog>
 
+<dialog id="mdlg">
+  <form id="mform" method="dialog">
+    <h2>📝 메모</h2>
+    <div class="gsub" id="m-sub"></div>
+    <textarea id="mtext" class="field" maxlength="1000" placeholder="예약 정보, 추천 메뉴, 영업시간, 가는 방법 등을 적어 두세요."></textarea>
+    <div class="gsub" id="m-count" style="text-align:right"></div>
+    <div class="dfoot">
+      <button class="btn ghost" type="button" id="m-clear">비우기</button>
+      <button class="btn ghost" type="button" id="m-cancel">닫기</button>
+      <button class="btn primary" type="submit" id="m-save">저장</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="cfm">
   <form id="cform" method="dialog">
     <h2>삭제할까요?</h2>
@@ -380,12 +399,12 @@ var days = [
 ];
 var stops = [
   { id: "s1", day: "d1", s: "11:30", e: "12:30", n: "모츠나베 라쿠텐치", c: "식사", a: "하카타", m: "예약 완료 · 2명\n기본 모츠나베 + 짬뽕면 추가", mv: "지하철", mm: 0, lat: 33.5898, lng: 130.4146, g: "" },
-  { id: "s2", day: "d1", s: "13:10", e: "15:00", n: "캐널시티 하카타", c: "쇼핑", a: "캐널시티", m: "분수쇼 시간 확인하기", mv: "도보", mm: 15, lat: 33.5894, lng: 130.4112, g: "" },
-  { id: "s3", day: "d1", s: "15:20", e: "16:10", n: "쿠시다 신사", c: "관광", a: "하카타", m: "", mv: "도보", mm: 8, lat: 33.5929, lng: 130.4107, g: "" },
-  { id: "s4", day: "d1", s: "19:00", e: "21:00", n: "하카타 포장마차 (야타이)", c: "식사", a: "나카스", m: "줄이 길면 옆 가게로", mv: "도보", mm: 12, lat: 33.5927, lng: 130.4046, g: "" },
-  { id: "s5", day: "d2", s: "10:00", e: "11:00", n: "이치란 본점", c: "식사", a: "텐진", m: "오픈 전 줄 서기", mv: "지하철", mm: 10, lat: 33.5918, lng: 130.4056, g: "" },
-  { id: "s6", day: "d2", s: "11:30", e: "13:30", n: "텐진 지하상가", c: "쇼핑", a: "텐진", m: "", mv: "도보", mm: 10, lat: 33.5911, lng: 130.3996, g: "" },
-  { id: "s7", day: "d3", s: "09:30", e: "11:00", n: "오호리공원 카페", c: "카페", a: "오호리", m: "호수 보이는 자리", mv: "지하철", mm: 20, lat: 33.5862, lng: 130.3766, g: "" }
+  { id: "s2", day: "d1", s: "13:10", e: "15:00", n: "캐널시티 하카타", c: "쇼핑", a: "캐널시티", m: "분수쇼 시간 확인하기\n쇼핑 후 저녁 전에 짐 정리하기", mv: "도보", mm: 15, lat: 33.5894, lng: 130.4112, g: "" },
+  { id: "s3", day: "d1", s: "15:20", e: "16:10", n: "쿠시다 신사", c: "관광", a: "하카타", m: "야마카사 축제 수레 구경하기\n입장 무료, 20~30분이면 충분", mv: "도보", mm: 8, lat: 33.5929, lng: 130.4107, g: "" },
+  { id: "s4", day: "d1", s: "19:00", e: "21:00", n: "하카타 포장마차 (야타이)", c: "식사", a: "나카스", m: "줄이 길면 옆 가게로\n현금 준비하기", mv: "도보", mm: 12, lat: 33.5927, lng: 130.4046, g: "" },
+  { id: "s5", day: "d2", s: "10:00", e: "11:00", n: "이치란 본점", c: "식사", a: "텐진", m: "오픈 전 줄 서기\n맛 진하기·마늘 등 취향은 주문 용지에 체크", mv: "지하철", mm: 10, lat: 33.5918, lng: 130.4056, g: "" },
+  { id: "s6", day: "d2", s: "11:30", e: "13:30", n: "텐진 지하상가", c: "쇼핑", a: "텐진", m: "비 오는 날에도 걷기 좋은 코스\n쇼핑 후 카페에서 쉬어가기", mv: "도보", mm: 10, lat: 33.5911, lng: 130.3996, g: "" },
+  { id: "s7", day: "d3", s: "09:30", e: "11:00", n: "오호리공원 카페", c: "카페", a: "오호리", m: "호수 보이는 자리\n산책 후 공항으로 이동하니 짐 챙기기", mv: "지하철", mm: 20, lat: 33.5862, lng: 130.3766, g: "" }
 ];
 
 var state = { day: "d1", sel: null, adding: false, cand: null };
@@ -420,7 +439,7 @@ function enterGroup(code, name, seed) {
   $("grp-lbl").textContent = g.name || g.code;
   sync.on = false; sync.last = ""; sync.dirty = false; clearTimeout(sync.timer); setBadge();
   routeEpoch++; refresh();
-  if (!isRO()) syncPull(true);
+  syncPull(true);
   return true;
 }
 /* ---------- 서버(노션) 동기화: /api/routee/:code 가 있을 때만 켜집니다 ---------- */
@@ -432,9 +451,9 @@ function canon(ds, ss) {
 }
 function setBadge() { var g = curGroup(); document.body.classList.toggle("ro", isRO()); if (g) $("grp-lbl").textContent = (g.name || g.code) + (isRO() ? " 🔒" : sync.on ? " ☁" : ""); }
 function syncUrl() { return "/api/routee/" + encodeURIComponent(grp.cur); }
-function busyUI() { return $("dlg").open || $("ddlg").open || $("cfm").open || state.adding || (typeof drag !== "undefined" && drag); }
+function busyUI() { return $("dlg").open || $("mdlg").open || $("ddlg").open || $("cfm").open || state.adding || (typeof drag !== "undefined" && drag); }
 function syncPull(first) {
-  if (!grp.cur || isRO() || sync.dirty || sync.busy || Date.now() < sync.quiet) return Promise.resolve();
+  if (!grp.cur || sync.dirty || sync.busy || Date.now() < sync.quiet) return Promise.resolve();
   var code = grp.cur;
   return fetch(syncUrl(), { cache: "no-store" }).then(function (r) { if (!r.ok) throw new Error("x"); return r.json(); }).then(function (d) {
     if (code !== grp.cur || sync.dirty) return;
@@ -443,17 +462,17 @@ function syncPull(first) {
     if (d.days.length) {
       if (rc !== sync.last && rc !== canon(days, stops)) {
         if (busyUI()) return;
-        days = d.days; stops = d.stops; save0(); state.sel = null;
+        days = d.days; stops = d.stops; if (!isRO()) save0(); state.sel = null;
         if (!dayOf(state.day)) state.day = sortedDays()[0] ? sortedDays()[0].id : null;
         routeEpoch++; refresh();
-        if (!first) toast("다른 사람이 수정한 일정을 불러왔어요.");
+        if (!first && !isRO()) toast("다른 사람이 수정한 일정을 불러왔어요.");
       }
       sync.last = rc;
-    } else if (first && days.length) { syncPush(); }
+    } else if (first && days.length && !isRO()) { syncPush(); }
   }).catch(function () { sync.fails++; if (sync.fails >= 3) { sync.on = false; setBadge(); } });
 }
 function save0() { try { localStorage.setItem(gk(grp.cur), JSON.stringify({ days: days, stops: stops })); } catch (e) {} }
-function syncDirty() { if (!sync.on) return; sync.dirty = true; clearTimeout(sync.timer); sync.timer = setTimeout(syncPush, 1200); }
+function syncDirty() { if (!sync.on || isRO()) return; sync.dirty = true; clearTimeout(sync.timer); sync.timer = setTimeout(syncPush, 1200); }
 function syncPush() {
   if (!grp.cur || sync.busy) { if (sync.busy) sync.timer = setTimeout(syncPush, 1500); return; }
   var code = grp.cur, snap = canon(days, stops); sync.busy = true;
@@ -535,8 +554,8 @@ function renderList() {
       '<div class="time">' + esc(p.s) + (p.e ? '<small>~ ' + esc(p.e) + '</small>' : "") + '</div>' +
       '<div class="rail"><span class="num">' + (i + 1) + '</span></div>' +
       '<div class="body">' + tr +
-      '<div class="note"><h3>' + esc(p.n) + '<span class="tag">' + esc(p.c) + '</span>' + (p.a ? '<span class="area">' + esc(p.a) + '</span>' : "") + '</h3>' +
-      (p.m ? '<div class="memo">' + esc(p.m) + '</div>' : "") +
+      '<div class="note"><h3>' + esc(p.n) + '<span class="tag">' + esc(p.c) + '</span>' + (p.a ? '<span class="area">' + esc(p.a) + '</span>' : "") +
+      '<button class="memobtn' + (p.m ? " has" : "") + '" type="button" data-act="memo" data-id="' + p.id + '" aria-label="메모 ' + (p.m ? "보기" : "추가") + '" title="' + (p.m ? esc(p.m.length > 60 ? p.m.slice(0, 60) + "…" : p.m) : "메모 추가") + '">📝</button></h3>' +
       '<div class="links"><a href="' + esc(mapLink(p)) + '" target="_blank" rel="noopener">구글지도에서 열기</a>' +
       (hasLL(p) ? '<a href="https://www.google.com/maps/dir/?api=1&destination=' + p.lat + ',' + p.lng + '" target="_blank" rel="noopener">길찾기</a>' : "") +
       '<span class="sp"></span><button class="lb" type="button" data-act="edit" data-id="' + p.id + '">수정</button>' +
@@ -1043,6 +1062,22 @@ function onSaveStop(e) {
 
 /* ---------- 날짜 팝업 ---------- */
 var editingDay = null;
+var memoId = null;
+function openMemo(id) {
+  var p = stops.filter(function (x) { return x.id === id; })[0]; if (!p) return;
+  memoId = id; var ro = isRO();
+  $("m-sub").textContent = p.n + (ro ? " · 구경만 가능한 그룹이라 수정할 수 없어요" : "");
+  $("mtext").value = p.m || ""; $("mtext").readOnly = ro;
+  $("m-save").hidden = ro; $("m-clear").hidden = ro;
+  memoCount(); $("mdlg").showModal(); if (!ro) { $("mtext").focus(); $("mtext").setSelectionRange($("mtext").value.length, $("mtext").value.length); }
+}
+function memoCount() { $("m-count").textContent = $("mtext").value.length + " / 1000"; }
+function onSaveMemo(e) {
+  e.preventDefault(); if (isRO()) return;
+  var p = stops.filter(function (x) { return x.id === memoId; })[0]; if (!p) { $("mdlg").close(); return; }
+  var v = $("mtext").value.trim(); if (v !== (p.m || "")) { p.m = v; save(); }
+  $("mdlg").close(); refresh(); toast(v ? "메모를 저장했어요." : "메모를 비웠어요.");
+}
 function openDay(d) {
   if (roGuard()) return;
   editingDay = d || null;
@@ -1356,7 +1391,7 @@ function initGroups() {
   refresh();
   startMap();
   initGroups();
-  if (curGroup() && !isRO()) syncPull(true);
+  if (curGroup()) syncPull(true);
   $("btn-stop").addEventListener("click", function () { if (!days.length) openDay(null); else if (state.adding) endAdd(); else startAdd(); });
   $("quick").addEventListener("click", function () { startAdd(); });
   $("btn-loc").addEventListener("click", function () { if (watchId !== null) locOff(); else locOn(); });
@@ -1369,6 +1404,7 @@ function initGroups() {
       var a = b.dataset.act;
       if (a === "edit") openStop(stops.find(function (s) { return s.id === b.dataset.id; }));
       else if (a === "del") askDelete("stop", b.dataset.id);
+      else if (a === "memo") openMemo(b.dataset.id);
       else if (a === "day-add") openDay(null);
       else if (a === "day-edit") { var d = dayOf(state.day); if (d) openDay(d); }
       else if (a === "day-del") { if (state.day) askDelete("day", state.day); }
@@ -1411,6 +1447,10 @@ function initGroups() {
       $("f-e").value = fromMin(toMin($("f-s").value) + (+r.value)); endManual = true;
     });
   });
+  $("mform").addEventListener("submit", onSaveMemo);
+  $("mtext").addEventListener("input", memoCount);
+  $("m-cancel").addEventListener("click", function () { $("mdlg").close(); });
+  $("m-clear").addEventListener("click", function () { $("mtext").value = ""; memoCount(); $("mtext").focus(); });
   $("dform").addEventListener("submit", onSaveDay);
   $("d-cancel").addEventListener("click", function () { $("ddlg").close(); });
   $("cform").addEventListener("submit", function (e) { e.preventDefault(); $("cfm").close(); doDelete(); });
