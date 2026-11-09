@@ -996,7 +996,7 @@ function calcRoute(auto) {
   var job = (mv !== "비행기" && mapApi && mapApi.route) ? mapApi.route(A, B, TRAVEL_MODE[mv], departAt(dayId, prev.e || prev.s), mv) : Promise.resolve(estimateRoute(A, B, mv));
   job.then(function (r) {
     if (seq !== calcSeq || !$("dlg").open) return;
-    calc = r; mmManual = false; $("f-mm").value = r.min;
+    calc = r; mmManual = false; $("f-mm").value = r.min; applyTravelStart();
     note.textContent = "‘" + prev.n + "’에서 " + fmtDist(r.m) + " · 약 " + r.min + "분 (" + (mv === "비행기" ? "직선거리 + 공항 수속·대기 약 2시간 포함, 대략 추정" : r.src === "est" ? "직선거리 기준 대략 추정" : "구글 경로 기준") + ")";
   });
 }
@@ -1009,7 +1009,21 @@ function chips(host, name, map, value, colored) {
   }).join("");
 }
 function radioVal(name) { var r = document.querySelector('input[name="' + name + '"]:checked'); return r ? r.value : ""; }
-var endManual = false;
+var endManual = false, startManual = false;
+/* 새 일정: 시작 시간 = 그날 마지막 일정의 종료 시간 + 이동 시간 (시작 시간을 직접 바꾸기 전까지) */
+function applyTravelStart() {
+  if (editing || startManual) return;
+  var last = dayStops($("f-day").value).slice(-1)[0]; if (!last) return;
+  var base = toMin(last.e || last.s); if (base === null) return;
+  var t = Math.min(1439, base + (+$("f-mm").value || 0)), hm = fromMin(t);
+  if ($("f-s").value === hm) return;
+  $("f-s").value = hm; followStart();
+}
+function followStart() {
+  var d = document.querySelector('input[name="dur"]:checked');
+  if (d) $("f-e").value = fromMin(toMin($("f-s").value) + (+d.value));
+  else if (!endManual || !$("f-e").value) $("f-e").value = $("f-s").value;
+}
 function clearDur() { var r = document.querySelector('input[name="dur"]:checked'); if (r) r.checked = false; }
 function openStop(p, dayId, cand) {
   if (roGuard()) return;
@@ -1020,7 +1034,7 @@ function openStop(p, dayId, cand) {
   var list = dayStops(p ? p.day : dayId), last = list[list.length - 1];
   var defS = last ? (last.e || last.s) : "10:00";
   $("f-s").value = p ? p.s : defS; $("f-e").value = p ? (p.e || p.s) : defS;
-  endManual = !!p && (p.e || p.s) !== p.s; clearDur();
+  endManual = !!p && (p.e || p.s) !== p.s; startManual = !!p; clearDur();
   $("f-n").value = p ? p.n : (cand ? cand.name : ""); $("f-a").value = p ? (p.a || "") : (cand ? guessArea(cand) : "");
   $("f-ll").value = p && hasLL(p) ? p.lat + ", " + p.lng : (cand ? cand.lat.toFixed(5) + ", " + cand.lng.toFixed(5) : "");
   chips($("f-cat"), "cat", CATS, p ? p.c : "식사", true);
@@ -1426,8 +1440,8 @@ function initGroups() {
   $("searchform").addEventListener("submit", onSearch);
   $("f-calc").addEventListener("click", function () { calcRoute(false); });
   $("f-mv").addEventListener("change", function () { calcRoute(false); });
-  $("f-mm").addEventListener("input", function () { mmManual = true; calc = null; $("f-calcnote").className = "calcnote"; $("f-calcnote").textContent = ""; });
-  ["f-ll", "f-s", "f-day"].forEach(function (id) { $(id).addEventListener("change", function () { if (!mmManual) calcRoute(true); }); });
+  $("f-mm").addEventListener("input", function () { mmManual = true; calc = null; applyTravelStart(); $("f-calcnote").className = "calcnote"; $("f-calcnote").textContent = ""; });
+  ["f-ll", "f-s", "f-day"].forEach(function (id) { $(id).addEventListener("change", function () { if (id === "f-day") applyTravelStart(); if (!mmManual) calcRoute(true); }); });
   $("cancel-add").addEventListener("click", endAdd);
   $("s-cancel").addEventListener("click", function () { $("dlg").close(); });
   $("f-here").addEventListener("click", function () {
@@ -1438,11 +1452,7 @@ function initGroups() {
       $("f-ll").value = p.coords.latitude.toFixed(5) + ", " + p.coords.longitude.toFixed(5); w.textContent = "";
     }, function () { w.textContent = "현재 위치를 가져오지 못했어요. 위치 권한을 확인해 주세요."; }, { enableHighAccuracy: true, timeout: 15000 });
   });
-  $("f-s").addEventListener("input", function () {
-    var d = document.querySelector('input[name="dur"]:checked');
-    if (d) $("f-e").value = fromMin(toMin($("f-s").value) + (+d.value));
-    else if (!endManual || !$("f-e").value) $("f-e").value = $("f-s").value;
-  });
+  $("f-s").addEventListener("input", function () { startManual = true; followStart(); });
   $("f-e").addEventListener("input", function () { endManual = true; clearDur(); });
   Array.prototype.forEach.call(document.querySelectorAll('input[name="dur"]'), function (r) {
     r.addEventListener("click", function () {
