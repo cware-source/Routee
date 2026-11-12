@@ -450,12 +450,12 @@ function enterGroup(code, name, seed) {
 var sync = { on: false, dirty: false, timer: null, last: "", busy: false, quiet: 0, fails: 0, v: "", base: { d: {}, s: {} } };
 var POLL_MS = 4000;
 function canon(ds, ss) {
-  var a = ds.map(function (d) { return [d.id, d.date, d.note || ""]; }).sort(), b = ss.map(function (x) { return [x.id, x.day, x.s, x.e || "", x.n, x.c, x.a || "", x.m || "", x.mv, +x.mm || 0, +x.md || 0, x.g || "", typeof x.lat === "number" ? x.lat : null, typeof x.lng === "number" ? x.lng : null]; }).sort();
+  var a = ds.map(function (d) { return [d.id, d.date, d.note || ""]; }).sort(), b = ss.map(function (x) { return [x.id, x.day, x.s, x.e || "", x.n, x.c, x.a || "", x.m || "", x.mv, +x.mm || 0, +x.md || 0, x.g || "", typeof x.lat === "number" ? x.lat : null, typeof x.lng === "number" ? x.lng : null, +x.o || 0]; }).sort();
   return JSON.stringify([a, b]);
 }
 /* 서버와 마지막으로 맞춘 상태(base)와 비교해, 내가 바꾼 항목만 서버로 보냅니다 → 다른 사람 수정을 덮어쓰지 않음 */
 function dKey(d) { return JSON.stringify([d.date || "", d.note || ""]); }
-function sKey(x) { return JSON.stringify([x.day, x.s, x.e || "", x.n, x.c, x.a || "", x.m || "", x.mv, +x.mm || 0, +x.md || 0, x.g || "", typeof x.lat === "number" ? x.lat : null, typeof x.lng === "number" ? x.lng : null]); }
+function sKey(x) { return JSON.stringify([x.day, x.s, x.e || "", x.n, x.c, x.a || "", x.m || "", x.mv, +x.mm || 0, +x.md || 0, x.g || "", typeof x.lat === "number" ? x.lat : null, typeof x.lng === "number" ? x.lng : null, +x.o || 0]); }
 function makeBase(ds, ss) { var b = { d: {}, s: {} }; ds.forEach(function (d) { b.d[d.id] = dKey(d); }); ss.forEach(function (x) { b.s[x.id] = sKey(x); }); return b; }
 function diffNow() {
   var o = { days: [], stops: [], delDays: [], delStops: [] }, ids = {};
@@ -534,7 +534,7 @@ function dur(m) { if (m < 60) return m + "분"; var h = Math.floor(m / 60), r = 
 function sortedDays() { return days.slice().sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; }); }
 function dayOf(id) { return days.find(function (d) { return d.id === id; }); }
 function dayNo(id) { return sortedDays().findIndex(function (d) { return d.id === id; }) + 1; }
-function dayStops(id) { return stops.filter(function (s) { return s.day === id; }).sort(function (a, b) { return toMin(a.s) - toMin(b.s); }); }
+function dayStops(id) { return stops.filter(function (s) { return s.day === id; }).sort(function (a, b) { return (toMin(a.s) - toMin(b.s)) || ((+a.o || 0) - (+b.o || 0)); }); }
 function fmtDate(d) { var x = ymd(d.date); return (x.getMonth() + 1) + "." + String(x.getDate()).padStart(2, "0"); }
 function wd(d) { return WD[ymd(d.date).getDay()]; }
 function mapLink(p) {
@@ -1102,7 +1102,7 @@ function onSaveStop(e) {
             mv: mv0, mm: mmv, md: md, g: g, lat: ll.lat, lng: ll.lng };
   var id;
   if (editing) { Object.assign(editing, v); id = editing.id; }
-  else { v.id = newId("s"); stops.push(v); id = v.id; }
+  else { v.id = newId("s"); v.o = stops.reduce(function (m, q) { return q.day === v.day ? Math.max(m, +q.o || 0) : m; }, 0) + 1; stops.push(v); id = v.id; }
   save(); $("dlg").close(); state.day = v.day; state.sel = id; if (state.adding) endAdd(); refresh();
   toast(editing ? "수정했어요." : "추가했어요.");
 }
@@ -1193,6 +1193,7 @@ function reorderDay(dayId, ids, movedId) {
     var len = q.e ? Math.max(0, toMin(q.e) - toMin(q.s)) : null;
     q.s = slots[i]; q.e = len === null ? "" : fromMin(toMin(q.s) + len);
   });
+  next.forEach(function (q, i) { q.o = i + 1; });   /* 같은 시작 시간끼리도 순서가 유지되고 서버에 저장되도록 순번을 기록 */
   var k = 0; stops = stops.map(function (q) { return q.day === dayId ? next[k++] : q; });
   next.forEach(function (q, i) { if (i && next[i - 1].id !== prevOf[q.id]) refreshTravel(next[i - 1], q, dayId, ep); });
   state.sel = movedId; save(); refresh();
@@ -1221,6 +1222,7 @@ function fixTimes(dayId) {
     }
   });
   if (!moved) { toast("겹치는 시간이 없어요."); return; }
+  dayStops(dayId).forEach(function (q, i) { q.o = i + 1; });
   save(); refresh();
   toast(moved + "곳의 시간을 뒤로 밀었어요.", "되돌리기", function () { restoreSnap(snap); });
 }
