@@ -42,7 +42,7 @@ const stopOf = (p, idOf) => {
 };
 // 바뀐 것만 노션에 쓰기 위한 비교용 값
 const kd = d => JSON.stringify([d.date || "", d.note || ""]);
-const ks = s => JSON.stringify([s.day, s.s || "", s.e || "", s.n || "", s.c || "", s.a || "", s.m || "", s.mv || "", +s.mm || 0, +s.md || 0, s.g || "", typeof s.lat === "number" ? s.lat : null, typeof s.lng === "number" ? s.lng : null]);
+const ks = s => JSON.stringify([s.day, s.s || "", s.e || "", s.n || "", s.c || "", s.a || "", s.m || "", s.mv || "", +s.mm || 0, +s.md || 0, s.g || "", typeof s.lat === "number" ? s.lat : null, typeof s.lng === "number" ? s.lng : null, +s.o || 0]);
 
 export default async function handler(req, res) {
   const code = String(req.query.code || "").toUpperCase().replace(/[^A-Z0-9가-힣-]/g, "").slice(0, 20);
