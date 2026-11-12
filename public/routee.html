@@ -441,18 +441,32 @@ function enterGroup(code, name, seed) {
   grp.cur = code; saveGroups(); restore();
   state.day = sortedDays()[0] ? sortedDays()[0].id : null; state.sel = null; state.adding = false; state.cand = null;
   $("grp-lbl").textContent = g.name || g.code;
-  sync.on = false; sync.last = ""; sync.dirty = false; clearTimeout(sync.timer); setBadge();
+  sync.on = false; sync.last = ""; sync.v = ""; sync.base = { d: {}, s: {} }; sync.dirty = false; clearTimeout(sync.timer); setBadge();
   routeEpoch++; refresh();
   syncPull(true);
   return true;
 }
 /* ---------- 서버(노션) 동기화: /api/routee/:code 가 있을 때만 켜집니다 ---------- */
-var sync = { on: false, dirty: false, timer: null, last: "", busy: false, quiet: 0, fails: 0 };
+var sync = { on: false, dirty: false, timer: null, last: "", busy: false, quiet: 0, fails: 0, v: "", base: { d: {}, s: {} } };
 var POLL_MS = 4000;
 function canon(ds, ss) {
   var a = ds.map(function (d) { return [d.id, d.date, d.note || ""]; }).sort(), b = ss.map(function (x) { return [x.id, x.day, x.s, x.e || "", x.n, x.c, x.a || "", x.m || "", x.mv, +x.mm || 0, +x.md || 0, x.g || "", typeof x.lat === "number" ? x.lat : null, typeof x.lng === "number" ? x.lng : null]; }).sort();
   return JSON.stringify([a, b]);
 }
+/* 서버와 마지막으로 맞춘 상태(base)와 비교해, 내가 바꾼 항목만 서버로 보냅니다 → 다른 사람 수정을 덮어쓰지 않음 */
+function dKey(d) { return JSON.stringify([d.date || "", d.note || ""]); }
+function sKey(x) { return JSON.stringify([x.day, x.s, x.e || "", x.n, x.c, x.a || "", x.m || "", x.mv, +x.mm || 0, +x.md || 0, x.g || "", typeof x.lat === "number" ? x.lat : null, typeof x.lng === "number" ? x.lng : null]); }
+function makeBase(ds, ss) { var b = { d: {}, s: {} }; ds.forEach(function (d) { b.d[d.id] = dKey(d); }); ss.forEach(function (x) { b.s[x.id] = sKey(x); }); return b; }
+function diffNow() {
+  var o = { days: [], stops: [], delDays: [], delStops: [] }, ids = {};
+  days.forEach(function (d) { ids[d.id] = 1; if (sync.base.d[d.id] !== dKey(d)) o.days.push(d); });
+  Object.keys(sync.base.d).forEach(function (id) { if (!ids[id]) o.delDays.push(id); });
+  var sids = {};
+  stops.forEach(function (x) { sids[x.id] = 1; if (sync.base.s[x.id] !== sKey(x)) o.stops.push(x); });
+  Object.keys(sync.base.s).forEach(function (id) { if (!sids[id]) o.delStops.push(id); });
+  return o;
+}
+function isEmptyDiff(o) { return !o.days.length && !o.stops.length && !o.delDays.length && !o.delStops.length; }
 function setBadge() { var g = curGroup(); document.body.classList.toggle("ro", isRO()); if (g) $("grp-lbl").textContent = (g.name || g.code) + (isRO() ? " 🔒" : sync.on ? " ☁" : ""); }
 function syncUrl() { return "/api/routee/" + encodeURIComponent(grp.cur); }
 function busyUI() { return $("dlg").open || $("mdlg").open || $("ddlg").open || $("cfm").open || state.adding || (typeof drag !== "undefined" && drag); }
@@ -462,6 +476,7 @@ function syncPull(first) {
   return fetch(syncUrl(), { cache: "no-store" }).then(function (r) { if (!r.ok) throw new Error("x"); return r.json(); }).then(function (d) {
     if (code !== grp.cur || sync.dirty) return;
     sync.on = true; sync.fails = 0; setBadge();
+    if (d.v && sync.v && d.v < sync.v) return;   // 내가 이미 본/저장한 것보다 오래된 응답(노션 반영 지연)은 무시
     var rc = canon(d.days, d.stops);
     if (d.days.length) {
       if (rc !== sync.last && rc !== canon(days, stops)) {
@@ -471,19 +486,33 @@ function syncPull(first) {
         routeEpoch++; refresh();
         if (!first && !isRO()) toast("다른 사람이 수정한 일정을 불러왔어요.");
       }
-      sync.last = rc;
+      sync.last = rc; sync.base = makeBase(d.days, d.stops); if (d.v && d.v > sync.v) sync.v = d.v;
     } else if (first && days.length && !isRO()) { syncPush(); }
   }).catch(function () { sync.fails++; if (sync.fails >= 3) { sync.on = false; setBadge(); } });
 }
 function save0() { try { localStorage.setItem(gk(grp.cur), JSON.stringify({ days: days, stops: stops })); } catch (e) {} }
 function syncDirty() { if (!sync.on || isRO()) return; sync.dirty = true; clearTimeout(sync.timer); sync.timer = setTimeout(syncPush, 1200); }
 function syncPush() {
-  if (!grp.cur || sync.busy) { if (sync.busy) sync.timer = setTimeout(syncPush, 1500); return; }
-  var code = grp.cur, snap = canon(days, stops); sync.busy = true;
-  fetch(syncUrl(), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ days: days, stops: stops }) })
-    .then(function (r) { if (!r.ok) throw new Error("x"); sync.last = snap; sync.quiet = Date.now() + 3500; if (code === grp.cur && snap === canon(days, stops)) sync.dirty = false; })
-    .catch(function () { toast("서버 저장에 실패했어요. 잠시 후 다시 시도합니다."); sync.timer = setTimeout(syncPush, 8000); })
-    .then(function () { sync.busy = false; if (sync.dirty && !sync.timer) syncDirty(); });
+  if (!grp.cur || isRO()) return;
+  if (sync.busy) { clearTimeout(sync.timer); sync.timer = setTimeout(syncPush, 1500); return; }
+  var code = grp.cur, df = diffNow();
+  if (isEmptyDiff(df)) { sync.dirty = false; return; }
+  sync.busy = true;
+  fetch(syncUrl(), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(df) })
+    .then(function (r) { if (!r.ok) throw new Error("x"); return r.json(); })
+    .then(function (res) {
+      if (code !== grp.cur) return;
+      df.days.forEach(function (d) { sync.base.d[d.id] = dKey(d); });
+      df.stops.forEach(function (x) { sync.base.s[x.id] = sKey(x); });
+      df.delDays.forEach(function (id) { delete sync.base.d[id]; });
+      df.delStops.forEach(function (id) { delete sync.base.s[id]; });
+      if (res && res.v && res.v > sync.v) sync.v = res.v;
+      sync.quiet = Date.now() + 6000;
+      if (isEmptyDiff(diffNow())) { sync.dirty = false; sync.last = canon(days, stops); }
+      else { clearTimeout(sync.timer); sync.timer = setTimeout(syncPush, 600); }
+    })
+    .catch(function () { toast("서버 저장에 실패했어요. 잠시 후 다시 시도합니다."); clearTimeout(sync.timer); sync.timer = setTimeout(syncPush, 8000); })
+    .then(function () { sync.busy = false; });
 }
 function b64u(u8) { var s = ""; for (var i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]); return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
 function unb64u(t) { t = t.replace(/-/g, "+").replace(/_/g, "/"); while (t.length % 4) t += "="; var s = atob(t), u = new Uint8Array(s.length); for (var i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; }
