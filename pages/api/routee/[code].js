@@ -1,6 +1,7 @@
-// GET  /api/routee/:code  → { days, stops }   (그룹 코드로 노션에서 읽기)
-// PUT  /api/routee/:code  ← { days, stops }   (그룹 코드 기준으로 노션에 통째로 반영)
-// 환경변수: NOTION_TOKEN, NOTION_DAYS_DB(날짜 DB의 data source/DB id), NOTION_STOPS_DB(일정 DB id)
+// GET  /api/routee/:code  → { days, stops, v }                       (그룹 코드로 노션에서 읽기)
+// PUT  /api/routee/:code  ← { days, stops, delDays, delStops }       (바뀐 항목만 반영 · 통째로 덮어쓰지 않음)
+// 환경변수: NOTION_TOKEN, NOTION_DAYS_DB, NOTION_STOPS_DB
+// 노션 컬럼(두 표 공통): 그룹 코드, 앱ID, rev(텍스트)
 const NOTION = "https://api.notion.com/v1";
 const HDR = () => ({ Authorization: "Bearer " + process.env.NOTION_TOKEN, "Notion-Version": "2022-06-28", "Content-Type": "application/json" });
 
@@ -30,7 +31,6 @@ async function upsert(db, existing, props) {
   if (existing) return nf("PATCH", `/pages/${existing}`, { properties: props });
   return nf("POST", "/pages", { parent: { database_id: db }, properties: props });
 }
-
 const dayOf = (p) => ({ id: txt(p.properties["앱ID"]), date: (p.properties["날짜"].date || {}).start || "", note: txt(p.properties["한 줄 메모"]) });
 const stopOf = (p, idOf) => {
   const q = p.properties, rel = (q["날짜"].relation || [])[0];
@@ -53,42 +53,48 @@ export default async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
   try {
     const dayPages = await listGroup(DAYS, code), stopPages = await listGroup(STOPS, code);
+    const idOf = {}; dayPages.forEach(p => { idOf[p.id] = txt(p.properties["앱ID"]); });
     if (req.method === "GET") {
-      const idOf = {}; dayPages.forEach(p => { idOf[p.id] = txt(p.properties["앱ID"]); });
       const days = dayPages.map(dayOf).filter(d => d.id);
       const stops = stopPages.map(p => stopOf(p, idOf)).filter(s => s.id && s.day);
-      return res.json({ days, stops });
+      // v: 이 그룹에서 가장 최근에 저장된 시각(ms). 화면은 이보다 오래된 응답을 무시합니다.
+      let v = ""; dayPages.concat(stopPages).forEach(p => { const r = txt(p.properties["rev"]); if (r > v) v = r; });
+      return res.json({ days, stops, v });
     }
     if (req.method === "PUT") {
-      const { days = [], stops = [] } = req.body || {};
-      if (days.length > 60 || stops.length > 400) return res.status(413).json({ error: "too large" });
-      const dayMap = {}, oldDay = {}, idOf = {};
-      dayPages.forEach(p => { const o = dayOf(p); dayMap[o.id] = p.id; oldDay[o.id] = kd(o); idOf[p.id] = o.id; });
+      const b = req.body || {};
+      const days = b.days || [], stops = b.stops || [], delDays = b.delDays || [], delStops = b.delStops || [];
+      if (days.length > 60 || stops.length > 400 || delDays.length > 60 || delStops.length > 400) return res.status(413).json({ error: "too large" });
+      const rev = String(Date.now());
+      const dayMap = {}, oldDay = {};
+      dayPages.forEach(p => { const o = dayOf(p); dayMap[o.id] = p.id; oldDay[o.id] = kd(o); });
       const stopMap = {}, oldStop = {};
       stopPages.forEach(p => { const o = stopOf(p, idOf); stopMap[o.id] = p.id; oldStop[o.id] = ks(o); });
+      let wrote = false;
       for (const d of days) {
+        if (!d || !d.id) continue;
         if (dayMap[d.id] && oldDay[d.id] === kd(d)) continue;
         const pg = await upsert(DAYS, dayMap[d.id], {
           "이름": { title: [{ text: { content: d.date || "날짜" } }] }, "날짜": { date: d.date ? { start: d.date } : null },
-          "한 줄 메모": rt(d.note), "그룹 코드": rt(code), "앱ID": rt(d.id) });
-        dayMap[d.id] = pg.id;
+          "한 줄 메모": rt(d.note), "그룹 코드": rt(code), "앱ID": rt(d.id), "rev": rt(rev) });
+        dayMap[d.id] = pg.id; wrote = true;
       }
       const seen = {};
       for (const s of stops) {
-        if (!dayMap[s.day]) continue;
+        if (!s || !s.id || !dayMap[s.day]) continue;   // 그 사이 다른 사람이 지운 날짜의 일정은 건너뜀
         if (stopMap[s.id] && oldStop[s.id] === ks(s)) continue;
         const idx = (seen[s.day] = (seen[s.day] || 0) + 1);
         const pg = await upsert(STOPS, stopMap[s.id], {
           "이름": { title: [{ text: { content: s.n || "(이름 없음)" } }] }, "날짜": { relation: [{ id: dayMap[s.day] }] },
           "시작": rt(s.s), "종료": rt(s.e), "분류": sel(s.c), "지역": sel(s.a), "메모": rt(s.m), "이동수단": sel(s.mv),
           "이동시간(분)": num(+s.mm || 0), "이동거리(m)": num(+s.md || 0), "구글지도 링크": { url: s.g || null },
-          "위도": num(s.lat), "경도": num(s.lng), "순서": num(typeof s.o === "number" ? s.o : idx), "그룹 코드": rt(code), "앱ID": rt(s.id) });
-        stopMap[s.id] = pg.id;
+          "위도": num(s.lat), "경도": num(s.lng), "순서": num(typeof s.o === "number" ? s.o : idx), "그룹 코드": rt(code), "앱ID": rt(s.id), "rev": rt(rev) });
+        stopMap[s.id] = pg.id; wrote = true;
       }
-      const keepD = new Set(days.map(d => d.id)), keepS = new Set(stops.filter(s => dayMap[s.day]).map(s => s.id));
-      for (const k of Object.keys(stopMap)) if (!keepS.has(k)) await nf("PATCH", `/pages/${stopMap[k]}`, { archived: true });
-      for (const k of Object.keys(dayMap)) if (!keepD.has(k)) await nf("PATCH", `/pages/${dayMap[k]}`, { archived: true });
-      return res.json({ ok: true });
+      // 지우라고 요청된 것만 보관 처리 (화면이 모르는 항목은 건드리지 않음)
+      for (const id of delStops) if (stopMap[id]) { await nf("PATCH", `/pages/${stopMap[id]}`, { archived: true }); delete stopMap[id]; wrote = true; }
+      for (const id of delDays) if (dayMap[id]) { await nf("PATCH", `/pages/${dayMap[id]}`, { archived: true }); delete dayMap[id]; wrote = true; }
+      return res.json({ ok: true, v: wrote ? rev : "" });
     }
     res.setHeader("Allow", "GET, PUT"); return res.status(405).end();
   } catch (e) { return res.status(502).json({ error: String(e.message || e) }); }
