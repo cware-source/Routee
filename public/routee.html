@@ -1410,14 +1410,13 @@ async function shareView() {
   try { d = await packData({ days: days, stops: stops.map(function (x) { var c = {}; for (var k in x) if (k !== "m") c[k] = x[k]; return c; }) }); } catch (e) { d = ""; }
   if (!d) { gwarn("gs-warn", "링크를 만들지 못했어요."); return; }
   url += "#v=" + d + "&n=" + encodeURIComponent(g.name || "");
-  var text = "[Routee] " + (g.name || "여행 일정") + "\n보기 전용 일정이에요. (수정·메모는 공유되지 않아요)";
   var touch = matchMedia("(pointer:coarse)").matches;
-  $("gs-link").value = text + "\n" + url; $("gs-link").hidden = false;
+  $("gs-link").value = url; $("gs-link").hidden = false;
   if (navigator.share && touch) {
-    try { await navigator.share({ title: "Routee 일정", text: text, url: url }); return; }
+    try { await navigator.share({ title: "Routee 일정", url: url }); return; }
     catch (e) { if (e && e.name === "AbortError") return; }
   }
-  var ok = await copyText(text + "\n" + url);
+  var ok = await copyText(url);
   gwarn("gs-warn", ok ? "보기 전용 링크를 복사했어요. 그룹 코드와 메모는 포함되지 않아요." : "자동 복사에 실패했어요. 아래 문구를 직접 복사해 보내 주세요.");
   if (!ok) { $("gs-link").focus(); $("gs-link").select(); }
 }
