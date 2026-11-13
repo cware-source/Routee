@@ -701,7 +701,7 @@ function makeFallback() {
 
 function makeGoogle() {
   $("gmap").hidden = false; $("map").hidden = true;
-  var map = new google.maps.Map($("gmap"), { center: { lat: 33.5902, lng: 130.4017 }, zoom: 14, gestureHandling: "greedy", zoomControl: false, mapTypeControl: false, streetViewControl: false, fullscreenControl: false, rotateControl: false, scaleControl: false, keyboardShortcuts: false, clickableIcons: false });
+  var map = new google.maps.Map($("gmap"), { center: { lat: 33.5902, lng: 130.4017 }, zoom: 14, gestureHandling: "greedy", disableDefaultUI: true, zoomControl: false, cameraControl: false, mapTypeControl: false, streetViewControl: false, fullscreenControl: false, rotateControl: false, scaleControl: false, keyboardShortcuts: false, clickableIcons: false });
   var geocoder = new google.maps.Geocoder();
   var overlays = [], resMarkers = [], tmp = null, sig = "", lastSel = null;
   function signature() { return state.day + "|" + dayPts().map(function (q) { return q.id + q.lat + q.lng; }).join(","); }
