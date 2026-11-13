@@ -184,6 +184,7 @@ dialog h2 { margin: 0; font-family: var(--serif); font-weight: 400; font-size: 2
 .gname { font-size: 14px; opacity: .8; }
 .gcode { font-family: var(--serif); font-size: 28px; letter-spacing: .12em; margin-top: 2px; }
 #grp-lbl { max-width: 9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
+body.ro .memobtn:not(.has) { display: none !important; }
 body.ro #btn-day, body.ro #btn-stop, body.ro #quick, body.ro [data-act="edit"], body.ro [data-act="del"], body.ro [data-act="day-add"], body.ro [data-act="day-edit"], body.ro [data-act="day-del"], body.ro .fixbtn, body.ro .tk.add { display: none !important; }
 .dfoot { display: flex; justify-content: flex-end; gap: 8px; }
 .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(18px + env(safe-area-inset-bottom, 0px)); z-index: 50; background: var(--ink); color: var(--paper); border-radius: 999px; padding: 9px 18px; font-size: 14px; display: flex; gap: 14px; align-items: center; }
@@ -337,14 +338,15 @@ body.ro #btn-day, body.ro #btn-stop, body.ro #quick, body.ro [data-act="edit"], 
   <form id="gsform" method="dialog">
     <h2>그룹 공유</h2>
     <div class="gbox"><div class="gname" id="gs-name"></div><div class="gcode" id="gs-code"></div></div>
-    <p class="gsub">‘공유하기’를 누르면 카카오톡·문자 등을 고를 수 있어요. 링크로 들어오면 코드가 자동 입력되고, 지금까지의 일정도 함께 전달돼요.</p>
+    <p class="gsub"><b>일정만 보내기</b>: 보기 전용 링크예요. 받는 사람은 수정할 수 없고, 그룹 코드와 메모는 전달되지 않아요.<br><b>그룹 초대</b>: 그룹 코드가 들어 있어 받는 사람도 함께 수정할 수 있어요.</p>
     <textarea id="gs-link" class="field" rows="4" readonly hidden></textarea>
     <div class="warn" id="gs-warn" role="alert"></div>
     <div class="dfoot" style="flex-wrap:wrap">
       <button class="btn ghost" type="button" id="gs-switch">그룹 바꾸기</button>
       <button class="btn ghost" type="button" id="gs-copy">코드 복사</button>
       <button class="btn ghost" type="button" id="gs-close">닫기</button>
-      <button class="btn primary" type="button" id="gs-share">공유하기</button>
+      <button class="btn ghost" type="button" id="gs-view">일정만 보내기 (보기 전용)</button>
+      <button class="btn primary" type="button" id="gs-share">그룹 초대</button>
     </div>
   </form>
 </dialog>
@@ -422,10 +424,12 @@ function gk(code) { return "routee-g-" + code; }
 function loadGroups() { try { var g = JSON.parse(localStorage.getItem(GKEY) || "null"); if (g && g.list) grp = g; } catch (e) {} }
 function saveGroups() { try { localStorage.setItem(GKEY, JSON.stringify(grp)); } catch (e) {} }
 function curGroup() { return grp.list.filter(function (g) { return g.code === grp.cur; })[0] || null; }
-function isRO() { return grp.cur === "DEMO"; }
-function roGuard() { if (!isRO()) return false; toast("DEMO 그룹은 구경만 할 수 있어요. 새 그룹을 만들어 일정을 만들어 보세요."); return true; }
+var view = null;   /* 읽기 전용 공유 링크로 열었을 때 {name}. 저장·동기화·그룹 코드와 무관 */
+function isRO() { return !!view || grp.cur === "DEMO"; }
+function roGuard() { if (!isRO()) return false; toast(view ? "공유받은 일정은 볼 수만 있어요." : "DEMO 그룹은 구경만 할 수 있어요. 새 그룹을 만들어 일정을 만들어 보세요."); return true; }
 function save() { if (!grp.cur || isRO()) return; try { localStorage.setItem(gk(grp.cur), JSON.stringify({ days: days, stops: stops })); } catch (e) {} syncDirty(); }
 function restore() {
+  if (view) return;
   days = []; stops = [];
   if (isRO()) { var o = JSON.parse(SAMPLE); days = o.days; stops = o.stops; return; }
   try { var d = JSON.parse(localStorage.getItem(gk(grp.cur)) || "null"); if (d && d.days) { days = d.days; stops = d.stops || []; } } catch (e) {}
@@ -435,6 +439,7 @@ function genCode() { var c = "ABCDEFGHJKMNPQRSTUVWXYZ23456789", a = "", b = ""; 
 /* 그룹 입장: 코드가 같으면 같은 일정(이 기기 기준), 다르면 완전히 다른 일정 */
 function enterGroup(code, name, seed) {
   code = normCode(code); if (code.length < 3) return false;
+  view = null;
   var g = grp.list.filter(function (x) { return x.code === code; })[0];
   if (!g) { g = { code: code, name: name || "" }; grp.list.unshift(g); if (seed) { try { localStorage.setItem(gk(code), seed); } catch (e) {} } }
   else { if (name) g.name = name; grp.list = [g].concat(grp.list.filter(function (x) { return x !== g; })); }
@@ -467,11 +472,11 @@ function diffNow() {
   return o;
 }
 function isEmptyDiff(o) { return !o.days.length && !o.stops.length && !o.delDays.length && !o.delStops.length; }
-function setBadge() { var g = curGroup(); document.body.classList.toggle("ro", isRO()); if (g) $("grp-lbl").textContent = (g.name || g.code) + (isRO() ? " 🔒" : sync.on ? " ☁" : ""); }
+function setBadge() { var g = curGroup(); document.body.classList.toggle("ro", isRO()); if (view) { $("grp-lbl").textContent = "👀 " + (view.name || "공유받은 일정") + " · 나가기"; return; } if (g) $("grp-lbl").textContent = (g.name || g.code) + (isRO() ? " 🔒" : sync.on ? " ☁" : ""); }
 function syncUrl() { return "/api/routee/" + encodeURIComponent(grp.cur); }
 function busyUI() { return $("dlg").open || $("mdlg").open || $("ddlg").open || $("cfm").open || state.adding || (typeof drag !== "undefined" && drag); }
 function syncPull(first) {
-  if (!grp.cur || sync.dirty || sync.busy || Date.now() < sync.quiet) return Promise.resolve();
+  if (view || !grp.cur || sync.dirty || sync.busy || Date.now() < sync.quiet) return Promise.resolve();
   var code = grp.cur;
   return fetch(syncUrl(), { cache: "no-store" }).then(function (r) { if (!r.ok) throw new Error("x"); return r.json(); }).then(function (d) {
     if (code !== grp.cur || sync.dirty) return;
@@ -1398,8 +1403,45 @@ async function shareGroup() {
   gwarn("gs-warn", ok ? "초대 문구와 링크를 복사했어요. 카톡이나 문자에 붙여넣어 보내세요." : "자동 복사에 실패했어요. 아래 문구를 직접 복사해 보내 주세요.");
   if (!ok) { $("gs-link").focus(); $("gs-link").select(); }
 }
+async function shareView() {
+  var g = curGroup(); if (!g) return;
+  gwarn("gs-warn", "");
+  var url = location.href.split("#")[0], d;
+  try { d = await packData({ days: days, stops: stops.map(function (x) { var c = {}; for (var k in x) if (k !== "m") c[k] = x[k]; return c; }) }); } catch (e) { d = ""; }
+  if (!d) { gwarn("gs-warn", "링크를 만들지 못했어요."); return; }
+  url += "#v=" + d + "&n=" + encodeURIComponent(g.name || "");
+  var text = "[Routee] " + (g.name || "여행 일정") + "\n보기 전용 일정이에요. (수정·메모는 공유되지 않아요)";
+  var touch = matchMedia("(pointer:coarse)").matches;
+  $("gs-link").value = text + "\n" + url; $("gs-link").hidden = false;
+  if (navigator.share && touch) {
+    try { await navigator.share({ title: "Routee 일정", text: text, url: url }); return; }
+    catch (e) { if (e && e.name === "AbortError") return; }
+  }
+  var ok = await copyText(text + "\n" + url);
+  gwarn("gs-warn", ok ? "보기 전용 링크를 복사했어요. 그룹 코드와 메모는 포함되지 않아요." : "자동 복사에 실패했어요. 아래 문구를 직접 복사해 보내 주세요.");
+  if (!ok) { $("gs-link").focus(); $("gs-link").select(); }
+}
+function exitView() {
+  view = null; sync.on = false; sync.last = ""; sync.v = ""; sync.base = { d: {}, s: {} };
+  if (!curGroup()) { grp.cur = ""; days = []; stops = []; refresh(); setBadge(); openGate(false); return; }
+  restore(); state.day = sortedDays()[0] ? sortedDays()[0].id : null; state.sel = null; routeEpoch++; setBadge(); refresh(); syncPull(true);
+  toast("내 일정으로 돌아왔어요.");
+}
 async function applyHash() {
-  var h = location.hash.replace(/^#/, ""); if (h.indexOf("g=") !== 0) return;
+  var h = location.hash.replace(/^#/, "");
+  if (h.indexOf("v=") === 0) {
+    var qv = {}; h.split("&").forEach(function (kv) { var i = kv.indexOf("="); if (i > 0) qv[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1)); });
+    try { history.replaceState(null, "", location.href.split("#")[0]); } catch (e) {}
+    var vd = null; try { vd = await unpackData(qv.v); } catch (e) {}
+    if (!vd || !vd.days) { toast("링크를 열 수 없어요. 다시 받아 주세요."); return; }
+    view = { name: qv.n || "" }; days = vd.days; stops = (vd.stops || []).map(function (x) { var c = {}; for (var k in x) if (k !== "m") c[k] = x[k]; return c; });
+    sync.on = false; sync.dirty = false; clearTimeout(sync.timer);
+    if ($("gate").open) $("gate").close();
+    state.day = sortedDays()[0] ? sortedDays()[0].id : null; state.sel = null; state.adding = false; state.cand = null;
+    routeEpoch++; setBadge(); refresh(); toast("보기 전용 일정이에요. 왼쪽 위 버튼으로 나갈 수 있어요.");
+    return;
+  }
+  if (h.indexOf("g=") !== 0) return;
   var q = {}; h.split("&").forEach(function (kv) { var i = kv.indexOf("="); if (i > 0) q[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1)); });
   try { history.replaceState(null, "", location.href.split("#")[0]); } catch (e) {}
   var code = normCode(q.g); if (!code) return;
@@ -1415,7 +1457,7 @@ async function applyHash() {
   } else toast("‘" + (q.n || code) + "’ 그룹으로 입장했어요.");
 }
 function initGroups() {
-  $("btn-grp").addEventListener("click", openShare);
+  $("btn-grp").addEventListener("click", function () { if (view) exitView(); else openShare(); });
   $("gform").addEventListener("submit", function (e) { e.preventDefault(); enterAndClose($("g-code").value, $("g-name").value.trim()); });
   $("g-new").addEventListener("click", function () { var c; do { c = genCode(); } while (grp.list.some(function (g) { return g.code === c; })); enterAndClose(c, $("g-name").value.trim()); });
   $("g-demo").addEventListener("click", function () { enterAndClose("DEMO", "예시 여행", SAMPLE); });
@@ -1425,11 +1467,12 @@ function initGroups() {
   $("gs-close").addEventListener("click", function () { $("gshare").close(); });
   $("gs-switch").addEventListener("click", function () { $("gshare").close(); openGate(true); });
   $("gs-share").addEventListener("click", shareGroup);
+  $("gs-view").addEventListener("click", shareView);
   $("gs-copy").addEventListener("click", function () { var g = curGroup(); copyText(g.code).then(function (ok) { gwarn("gs-warn", ok ? "코드를 복사했어요." : "복사에 실패했어요. 코드를 직접 전달해 주세요."); }); });
   window.addEventListener("hashchange", applyHash);
   (function loop() { setTimeout(function () { (document.hidden ? Promise.resolve() : syncPull(false)).then(loop, loop); }, sync.fails ? Math.min(30000, POLL_MS * (sync.fails + 1)) : POLL_MS); })();
   document.addEventListener("visibilitychange", function () { if (!document.hidden) syncPull(false); });
-  applyHash().then(function () { if (!curGroup()) openGate(false); });
+  applyHash().then(function () { if (!curGroup() && !view) openGate(false); });
 }
 (function init() {
   loadGroups(); renderLegend(); initDrag();
